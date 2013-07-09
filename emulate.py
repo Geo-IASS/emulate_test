@@ -165,6 +165,26 @@ def reconstruct(gps,SB,inputs):
     fwd += np.matrix(pred_mu).T * np.matrix(SB[i])
   return np.array(fwd)
 
+def reconstructD(gps,SB,inputs):
+  '''
+  spectral reconstruction from GPs and spectral basis functions
+  '''
+  fwd = 0
+  inputs = np.atleast_2d(np.array(inputs))
+  deriv = np.zeros((inputs.shape[1],SB[0].shape[0]))
+  derivt = np.zeros((inputs.shape[1],SB[0].shape[0]))
+
+  for i in xrange(SB.shape[0]):
+    pred_mu, pred_var, grad  = gps[i].predict(inputs)
+    fwd += np.matrix(pred_mu).T * np.matrix(SB[i])
+    deriv += np.matrix(grad).T * np.matrix(SB[i])
+  # check code , but its the same
+  #for j in xrange(inputs.shape[1]):
+  #  for i in xrange(SB.shape[0]):
+  #    pred_mu, pred_var, grad  = gps[i].predict(inputs)
+  #    derivt[j,:] += grad[:,j] * SB[i]
+  return np.array(fwd)[0],deriv
+
 
 def brdfModel(s,vza,sza,raa):
   '''
@@ -270,7 +290,6 @@ params = {}
 for i in pmin.keys():
   params.update(invtransform({i:ones*(pmin[i]+pmax[i])*0.5}))
 params.update(invtransform({'xlai':xlais}))
-#import pdb;pdb.set_trace()
 
 # now run true model
 brdf = brdfModel(params,vza,sza,raa)[-1]
@@ -307,6 +326,19 @@ for i in xrange(train_SB.shape[0]):
 
 plt.legend()
 plt.show()
+
+# check derivatives
+inputs_t,keys = unpack(train_params.tolist())
+xf = lambda x:gps[0].predict ( np.atleast_2d(x) )[0]
+import scipy.optimize
+trueDerive = []
+for i in xrange(inputs_t.shape[0]):
+  trueDerive.append(scipy.optimize.approx_fprime(inputs_t[i],xf,1e-10))
+pred_mu, pred_var, deriv  = gps[0].predict ( np.atleast_2d(inputs_t) )
+# plot
+plt.plot(np.array(trueDerive).flatten(),deriv.flatten(),'g+')
+
+
 
 # Now look at some example reconstructions
 
@@ -355,12 +387,13 @@ plt.show()
 
 
 # function to do the minimisation in spectral space
-def func(params,brf,SB,gps):
-  fwd = reconstruct(gps,SB,params)[0]
+def funcd(params,brf,SB,gps):
+  fwd,derivs = reconstructD(gps,SB,params)
   obs = brf
   d = (fwd - obs)
-  e = np.mean(d*d)
-  return e
+  Jprime = np.matrix(d) * np.matrix(derivs).T
+  e = np.sum(d*d)
+  return 0.5*e,Jprime.T
 
 from  scipy.optimize import fmin_l_bfgs_b
 
@@ -377,20 +410,21 @@ for k in keys:
   x.append((pmin[k]+pmax[k])*0.5)
 
 # function to do the minimisation in EOF space
-def func2(params,projectedBrf,gps):
+def funcd2(params,projectedBrf,gps):
   params = np.atleast_2d(np.array(params))
   e = 0.
+  Jprime = np.zeros_like(params)
   for i in xrange(len(gps)):
     fwd,sd,deriv = gps[i].predict(params)
-    d = (projectedBrf[i] - fwd[0]) # /sd[0]
+    d = (fwd[0] - projectedBrf[i]) # /sd[0]
+    Jprime += d*deriv
     e += d*d
-  return e
+  return 0.5*e,Jprime
 
 # project the test_brf data
 test_SB = np.dot(test_brf,SB.T)
-
 def solver2(i,noshow=True):
-  params = fmin_l_bfgs_b(func2,x,bounds=b,args=(test_SB[i],gps),iprint=0,approx_grad=1)[0]
+  params = fmin_l_bfgs_b(funcd2,x,bounds=b,args=(test_SB[i],gps),iprint=0)[0]
   fwd = reconstruct(gps,SB,params)[0]
   if not noshow:
     plt.figure(i)
@@ -403,7 +437,7 @@ def solver2(i,noshow=True):
 
 
 def solver(i,noshow=True):
-  params = fmin_l_bfgs_b(func,x,bounds=b,args=(test_brf[i],SB,gps),iprint=0,approx_grad=1)[0]
+  params = fmin_l_bfgs_b(funcd,x,bounds=b,args=(test_brf[i],SB,gps),iprint=0)[0]
   fwd = reconstruct(gps,SB,params)[0]
   plt.figure(i)
   plt.clf()

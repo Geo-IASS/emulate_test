@@ -137,10 +137,10 @@ class GaussianProcess:
         var = b - np.sum (  a * np.dot(self.invQ,a), axis=0)
         # Derivative and partial derivatives of the function
         deriv = np.zeros ( ( nn, self.D ) )
-        
+        #import pdb;pdb.set_trace() 
         for d in xrange ( self.D ):
             c = a*(( np.tile( self.inputs[:,d], (nn,1)) - \
-                    np.tile( testing[:, d], ( self.n, 1)).T)**2).T
+                    np.tile( testing[:, d], ( self.n, 1)).T)).T
             deriv[:, d] = expX[d]*np.dot(c.T, self.invQt)
 
             
