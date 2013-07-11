@@ -13,7 +13,25 @@ def xify(p,params = ['n','xcab','xcar','cbrown','xcw','xcm','xala','bsoil','psoi
       retval[i] = p[i]
   return retval
 
-def invtransform(params,logvals = {'ala': 90., 'lai':-2.0, 'cab':-100., 'car':-100., 'cw':-1/50., 'cm':-1./100}):
+def invtransform(params,total=False,\
+        logvals = {'ala': 90., 'lai':-2.0, 'cab':-100., 'car':-100., 'cw':-1/50., 'cm':-1./100}):
+  '''
+  Parameters:
+
+    params : parameter dictionary
+
+  Options:
+
+    logvals : log scaling values
+    total   : for leaf quantities, multiply by LAI
+  '''
+  if total:
+    logvals['cab'] *= 2.
+    logvals['car'] *= 2.
+    logvals['cw'] *= 2.
+    logvals['cm'] *= 2
+    logvals['cbrown'] = 15.
+
   retval = {}
   for i in xify(params).keys():
     if i[0] != 'x':
@@ -29,7 +47,26 @@ def invtransform(params,logvals = {'ala': 90., 'lai':-2.0, 'cab':-100., 'car':-1
         retval[rest] = params[i]
   return retval
 
-def transform(params,logvals = {'ala': 90., 'lai':-2.0, 'cab':-100., 'car':-100., 'cw':-1/50., 'cm':-1./100}):
+def transform(params,total=False,\
+    logvals = {'ala': 90., 'lai':-2.0, 'cab':-100., 'car':-100., 'cw':-1/50., 'cm':-1./100}):
+
+  '''
+  Parameters:
+
+    params : parameter dictionary
+
+  Options:
+
+    logvals : log scaling values
+    total   : for leaf quantities, multiply by LAI
+  '''
+  if total:
+    logvals['cab'] *= 2.
+    logvals['car'] *= 2.
+    logvals['cw'] *= 2.
+    logvals['cm'] *= 2
+    logvals['cbrown'] = 15.
+
   retval = {}
   for i in xify(params).keys():
     if i[0] != 'x':
@@ -45,9 +82,13 @@ def transform(params,logvals = {'ala': 90., 'lai':-2.0, 'cab':-100., 'car':-100.
         retval[i] = params[i]
   return retval
 
-def limits():
+def limits(total=False):
   '''
   Set limits for parameters
+
+  Options:
+  
+    total : True then set this for *total* canopt chlorophyll etc (i.e. multiply by LAI)
   '''
   params = ['n','xcab','xcar','cbrown','xcw','xcm','xala','bsoil','psoil','hspot','xlai']
   pmin = {}
@@ -56,19 +97,23 @@ def limits():
   for i in params:
     pmin[i] = 0.001
     pmax[i] = 1. - 0.001
+  if total:
+    laiMult = 15.
+  else:
+    laiMult = 1.0
   # now specific limits
   # These from Feret et al.
   pmin['xlai'] = transform({'lai':15.})['xlai']
   pmin['xcab'] = transform({'cab':0.2})['xcab']
-  pmax['xcab'] = transform({'cab':76.8})['xcab']
-  pmin['xcar'] = transform({'car':25.3})['xcar']
+  pmax['xcab'] = transform({'cab':76.8*laiMult})['xcab']
+  pmin['xcar'] = transform({'car':25.3*laiMult})['xcar']
   pmax['xcar'] = transform({'car':0.})['xcar']
-  pmin['cbrown'] = 1.
+  pmin['cbrown'] = 1.*laiMult
   pmax['cbrown'] = 0.
   pmin['xcm'] = transform({'cm':0.0017})['xcm']
-  pmax['xcm'] = transform({'cm':0.0331})['xcm']
+  pmax['xcm'] = transform({'cm':0.0331*laiMult})['xcm']
   pmin['xcw'] = transform({'cw':0.0043})['xcw']
-  pmax['xcw'] = transform({'cw':0.0713})['xcw']
+  pmax['xcw'] = transform({'cw':0.0713*laiMult})['xcw']
 
   pmin['n'] = 0.8
   pmax['n'] = 2.5
@@ -182,6 +227,45 @@ def reconstructD(gps,SB,inputs):
   #    pred_mu, pred_var, grad  = gps[i].predict(inputs)
   #    derivt[j,:] += grad[:,j] * SB[i]
   return np.array(fwd)[0],deriv
+
+
+def brdfModel(s,vza,sza,raa,bandpass=None):
+  '''
+  Run the full BRDF model for parameters in s
+
+  Parameters:
+    s   : dictionary of model parameters (state)
+    vza : view zenith angle (degrees) 
+          float or float array of the same size as the number of
+          entries in each dictionary item
+    sza : solar zenith angle (degrees) 
+          float or float array of the same size as the number of
+          entries in each dictionary item
+    raa : relative azimuth angle (degrees) 
+          float or float array of the same size as the number of
+          entries in each dictionary item
+
+  Options:
+    bandpass : set of bandpass functions
+  '''
+  from prosail_fortran import run_prosail 
+  brdf = []
+  wavelength = np.arange(400,2501).astype(float)
+  for i in xrange(len(s['n'])):
+    try:
+      brf = run_prosail(s['n'][i],s['cab'][i],s['car'][i],s['cbrown'][i],s['cw'][i],s['cm'][i],\
+                s['lai'][i],s['ala'][i],0.0,s['bsoil'][i],s['psoil'][i],s['hspot'][i],\
+                vza[i],sza[i],raa[i],2)
+    except:
+      brf = run_prosail(s['n'][i],s['cab'][i],s['car'][i],s['cbrown'][i],s['cw'][i],s['cm'][i],\
+                s['lai'][i],s['ala'][i],0.0,s['bsoil'][i],s['psoil'][i],s['hspot'][i],\
+                vza,sza,raa,2)
+    if bandpass:
+      brf = bandpass * brf
+    brdf.append(brf)
+  if bandpass:
+    wavelength = bandpass * wavelength    
+  return (vza,sza,raa),transform(s),fixnan(np.array(brdf)),wavelength
 
 
 def lut(n=2,vza=0.,sza=45.,raa=0.,brdf=None,bands=None):
