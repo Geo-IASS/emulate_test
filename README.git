@@ -1,0 +1,8 @@
+ipython notebook --pylab=inline
+
+git pull origin master
+git status
+git add *py *nb
+git commit -am "initial commit"
+git push origin master
+
