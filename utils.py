@@ -279,3 +279,4 @@ def lut(n=2,vza=0.,sza=45.,raa=0.,brdf=None,bands=None):
   s = samples(n=n)
   return brdfModel(s,vza,sza,raa)
 
+
